@@ -655,6 +655,7 @@ class SchedulePage(param: String? = null) : MainFragment(param) {
                 launch {
                     scheduleViewModel.noteStates.collect { states ->
                         currentNoteStates = states
+                        currentData?.let { renderSchedule(it, currentPraiseStates, currentNoteStates) }
 
                         for ((lessonKey, state) in states) {
                             if (state is LoadState.Error) {

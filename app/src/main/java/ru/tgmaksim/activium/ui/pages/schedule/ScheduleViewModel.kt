@@ -6,6 +6,7 @@ import java.time.ZonedDateTime
 import kotlinx.datetime.LocalDate
 import kotlinx.datetime.toKotlinMonth
 
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.flow.asStateFlow
@@ -17,7 +18,6 @@ import ru.tgmaksim.activium.api.json
 import ru.tgmaksim.activium.api.School
 import ru.tgmaksim.activium.api.Dnevnik
 import ru.tgmaksim.activium.ui.core.toUi
-import ru.tgmaksim.activium.ui.core.UiText
 import ru.tgmaksim.activium.api.NoteResult
 import ru.tgmaksim.activium.api.ScheduleDay
 import ru.tgmaksim.activium.ui.LoginActivity
@@ -25,7 +25,6 @@ import ru.tgmaksim.activium.api.DnevnikTools
 import ru.tgmaksim.activium.ui.core.LoadState
 import ru.tgmaksim.activium.ui.core.UiViewModel
 import ru.tgmaksim.activium.utilities.Utilities
-import ru.tgmaksim.activium.ui.core.setCacheError
 import ru.tgmaksim.activium.ui.core.setShownError
 import ru.tgmaksim.activium.ui.core.setCacheLoading
 import ru.tgmaksim.activium.ui.core.setCacheSuccess
@@ -55,6 +54,9 @@ class ScheduleViewModel : UiViewModel() {
 
     private val _clickPostStates = MutableStateFlow<Map<Long, LoadState<MarkSchoolPostResult>>>(emptyMap())
     val clickPostStates = _clickPostStates.asStateFlow()
+
+    private var loadCacheScheduleJob: Job? = null
+    private var loadCloudCacheScheduleJob: Job? = null
 
     companion object {
         const val CACHE_SCHEDULE_NAME = "schedule"
@@ -112,47 +114,47 @@ class ScheduleViewModel : UiViewModel() {
     }
 
     fun loadCacheSchedule() {
-        viewModelScope.launch {
+        val job = loadCacheScheduleJob
+        if (job?.isActive == true)
+            job.cancel()
+
+        loadCacheScheduleJob = viewModelScope.launch {
             _scheduleState.setCacheLoading()
 
+            val before = SettingsManager.getBeforeSchedule()
+            val after = SettingsManager.getAfterSchedule()
+            val totalDays = before + 1 + after
+
+            val childId = SettingsManager.getActiveChildId()
+
             try {
-                val before = SettingsManager.getBeforeSchedule()
-                val after = SettingsManager.getAfterSchedule()
-                val totalDays = before + 1 + after
+                val timezone = CacheManager.read(childId, CACHE_TIMEZONE_NAME)?.value?.toInt()
+                    ?: throw CacheNullException()
 
-                val childId = SettingsManager.getActiveChildId()
+                val entity = CacheManager.read(childId, CACHE_SCHEDULE_NAME)
+                    ?: throw CacheNullException()
+                val schedule = json.decodeFromString<List<ScheduleDay>>(entity.value)
 
-                try {
-                    val timezone = CacheManager.read(childId, CACHE_TIMEZONE_NAME)?.value?.toInt()
-                        ?: throw CacheNullException()
-
-                    val entity = CacheManager.read(childId, CACHE_SCHEDULE_NAME)
-                        ?: throw CacheNullException()
-                    val schedule = json.decodeFromString<List<ScheduleDay>>(entity.value)
-
-                    val hasAbilityPraise = false
-                    _scheduleData.value = UiScheduleResult(
-                        schedule = normalizeSchedule(schedule, before, after, timezone, hasAbilityPraise),
-                        timezone = timezone,
-                        hasAbilityPraise = hasAbilityPraise
-                    )
-                    _scheduleState.setCacheSuccess()
-                } catch (e: CancellationException) {
-                    throw e
-                } catch (e: Exception) {
-                    if (e !is CacheNullException) {
-                        Utilities.log(e, "Error at loadCacheSchedule")
-                        CacheManager.writeDnevnikCache(childId, CACHE_SCHEDULE_NAME, value = "")
-                    }
-                    _scheduleData.value = UiScheduleResult(
-                        schedule = List(totalDays) { null },
-                        timezone = 0,
-                        hasAbilityPraise = false
-                    )
-                    _scheduleState.setCacheSuccess()
-                }
+                val hasAbilityPraise = false
+                _scheduleData.value = UiScheduleResult(
+                    schedule = normalizeSchedule(schedule, before, after, timezone, hasAbilityPraise),
+                    timezone = timezone,
+                    hasAbilityPraise = hasAbilityPraise
+                )
+                _scheduleState.setCacheSuccess()
             } catch (_: CancellationException) {
-                _scheduleState.setCacheError(UiText.StringResource(R.string.error_schedule))
+                // Запущена другая задача
+            } catch (e: Exception) {
+                if (e !is CacheNullException) {
+                    Utilities.log(e, "Error at loadCacheSchedule")
+                    CacheManager.writeDnevnikCache(childId, CACHE_SCHEDULE_NAME, value = "")
+                }
+                _scheduleData.value = UiScheduleResult(
+                    schedule = List(totalDays) { null },
+                    timezone = 0,
+                    hasAbilityPraise = false
+                )
+                _scheduleState.setCacheSuccess()
             }
         }
     }
@@ -185,7 +187,11 @@ class ScheduleViewModel : UiViewModel() {
     }
 
     fun loadCloudSchedule() {
-        viewModelScope.launch {
+        val job = loadCloudCacheScheduleJob
+        if (job?.isActive == true)
+            job.cancel()
+
+        loadCloudCacheScheduleJob = viewModelScope.launch {
             val childId = SettingsManager.getActiveChildId()
             val before = SettingsManager.getBeforeSchedule()
             val after = SettingsManager.getAfterSchedule()

@@ -1,5 +1,6 @@
 package ru.tgmaksim.activium.ui.pages.marks
 
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.flow.asStateFlow
@@ -35,6 +36,9 @@ class MarksViewModel : UiViewModel() {
 
     private val _finalMarksState = MutableStateFlow<CacheDataLoadState>(CacheDataLoadState.Empty)
     val finalMarksState = _finalMarksState.asStateFlow()
+
+    private var loadCacheMarksJob: Job? = null
+    private var loadCloudMarksJob: Job? = null
 
     companion object {
         const val CACHE_LAST_MARKS_NAME = "marks"
@@ -75,46 +79,50 @@ class MarksViewModel : UiViewModel() {
     }
 
     fun loadCacheMarks() {
-        viewModelScope.launch {
+        val job = loadCacheMarksJob
+        if (job?.isActive == true)
+            job.cancel()
+
+        loadCacheMarksJob = viewModelScope.launch {
             _marksState.setCacheLoading()
 
+            val childId = SettingsManager.getActiveChildId()
+
             try {
-                val childId = SettingsManager.getActiveChildId()
+                val entityLastMarks = CacheManager.read(childId, CACHE_LAST_MARKS_NAME)
+                    ?: throw CacheNullException()
+                val lastMarks = json.decodeFromString<List<MarkLast>>(entityLastMarks.value)
 
-                try {
-                    val entityLastMarks = CacheManager.read(childId, CACHE_LAST_MARKS_NAME)
-                        ?: throw CacheNullException()
-                    val lastMarks = json.decodeFromString<List<MarkLast>>(entityLastMarks.value)
+                val entitySubjectMarksPeriod = CacheManager.read(childId, CACHE_SUBJECT_MARKS_PERIOD)
+                    ?: throw CacheNullException()
+                val subjectMarksPeriod = json.decodeFromString<List<MarksSubjectPeriod>>(entitySubjectMarksPeriod.value)
 
-                    val entitySubjectMarksPeriod = CacheManager.read(childId, CACHE_SUBJECT_MARKS_PERIOD)
-                        ?: throw CacheNullException()
-                    val subjectMarksPeriod = json.decodeFromString<List<MarksSubjectPeriod>>(entitySubjectMarksPeriod.value)
-
-                    _marksData.value = UiMarksResult(
-                        recentMarks = lastMarks,
-                        periodMarks = subjectMarksPeriod,
-                        ratingKey = null,
-                        finalMarks = emptyList()
-                    )
-                    _marksState.setCacheSuccess()
-                } catch (e: CancellationException) {
-                    throw e
-                } catch (e: Exception) {
-                    if (e !is CacheNullException) {
-                        Utilities.log(e, "Error at loadCacheMarks")
-                        CacheManager.writeDnevnikCache(childId, CACHE_LAST_MARKS_NAME, value = "")
-                        CacheManager.writeDnevnikCache(childId, CACHE_SUBJECT_MARKS_PERIOD, value = "")
-                    }
-                    _marksState.setCacheSuccess()
-                }
+                _marksData.value = UiMarksResult(
+                    recentMarks = lastMarks,
+                    periodMarks = subjectMarksPeriod,
+                    ratingKey = null,
+                    finalMarks = emptyList()
+                )
+                _marksState.setCacheSuccess()
             } catch (_: CancellationException) {
-                _marksState.setCacheError(UiText.StringResource(R.string.error_marks))
+                // Запущена другая задача
+            } catch (e: Exception) {
+                if (e !is CacheNullException) {
+                    Utilities.log(e, "Error at loadCacheMarks")
+                    CacheManager.writeDnevnikCache(childId, CACHE_LAST_MARKS_NAME, value = "")
+                    CacheManager.writeDnevnikCache(childId, CACHE_SUBJECT_MARKS_PERIOD, value = "")
+                }
+                _marksState.setCacheSuccess()
             }
         }
     }
 
     fun loadCloudMarks() {
-        viewModelScope.launch {
+        val job = loadCloudMarksJob
+        if (job?.isActive == true)
+            job.cancel()
+
+        loadCloudMarksJob = viewModelScope.launch {
             val childId = SettingsManager.getActiveChildId()
             val period = SettingsManager.getLastMarksPeriod()
 

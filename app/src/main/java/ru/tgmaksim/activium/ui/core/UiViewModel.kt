@@ -112,7 +112,7 @@ open class UiViewModel : ViewModel() {
                 onSuccess(response)
             }
         } catch (_: CancellationException) {
-            state.setCacheSuccess()
+            // Запущена другая задача
             loading = false
         } catch (_: TlsException) {
             state.setCloudError(UiText.StringResource(R.string.error_server))
@@ -180,7 +180,7 @@ open class UiViewModel : ViewModel() {
                 onSuccess(answer)
             }
         } catch (_: CancellationException) {
-            onNewState(state.setError(stateKey, UiText.StringResource(errorRes)))
+            // Запущена другая задача
             loading = false
         } catch (_: TlsException) {
             onNewState(state.setError(stateKey, UiText.StringResource(R.string.error_server)))
